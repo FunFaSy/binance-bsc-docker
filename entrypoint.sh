@@ -2,11 +2,14 @@
 
 set -e
 set -o errexit
-set -o nounset
+#set -o nounset
 
 DATA_DIR=/node
+NET_NAME=
+NET_ID=
+pid=0
 
-init_node() {
+init() {
   if [ -z "$NET_ID" ]; then
     echo "NET_ID env not set. Using default NET_ID=56 (BSC mainnet)"
     NET_ID=56
@@ -20,13 +23,12 @@ init_node() {
     echo "Unsupported network $NET_ID. Use either 56 (mainnet) or 97 (testnet)"
     exit 1
   fi
-  echo "Running on BSC $NET_NAME #$NET_ID"
 
   if [ ! -d "$DATA_DIR/geth" ]; then
     echo "Geth data directory not initialized yet. Populating from pre-initialized folder."
-    cp "/bsc_$NET_NAME/genesis.json" "$DATA_DIR/" \
-    && cd $DATA_DIR \
-    && /usr/local/bin/geth --datadir . init genesis.json
+    cp "/bsc_$NET_NAME/genesis.json" "$DATA_DIR/" &&
+      cd $DATA_DIR &&
+      /usr/local/bin/geth --datadir . init genesis.json
   fi
 
   if [ ! -f "$DATA_DIR/config.toml" ]; then
@@ -38,7 +40,7 @@ init_node() {
 
 # Starts the node(geth) with
 # whatever arguments we pass to it ("$@")
-start_node() {
+start() {
   # first arg is `-f` or `--some-option`
   if [ "${1#-}" != "$1" ]; then
     set -- /usr/local/bin/geth --datadir "$DATA_DIR" --config "$DATA_DIR/config.toml" "$@"
@@ -51,28 +53,31 @@ start_node() {
   fi
 
   exec "${@}" &
-  pid=$!
+  pid="$!"
 
-  exit 0
+  echo "Running on BSC $NET_NAME #$NET_ID"
 }
 
 # Gracefully stops node
-stop_node() {
-  echo 'Stopping PID $pid; kill -SIGINT $pid'
-  # A signal emitted while waiting will make the wait command return code > 128
-  # Let's wrap it in a loop that doesn't end before the process is indeed stopped
-  while kill -s INT "$pid" >/dev/null 2>&1; do
-    sleep 30 &
-    wait $pid
-  done
+stop() {
+  if [ $pid -ne 0 ]; then
+    echo "Stopping BSC process (PID $pid )"
 
-  exit 0
+    # A signal emitted while waiting will make the wait command return code > 128
+    # Let's wrap it in a loop that doesn't end before the process is indeed stopped
+    while kill -s INT "$pid" >/dev/null 2>&1; do
+      sleep 30 &
+      wait $pid
+    done
+  fi
+
+  exit
 }
 
-trap stop_node INT TERM USR1 EXIT
+trap stop INT TERM USR1 EXIT
 
-init_node
-start_node "$@"
+init
+start "$@"
 
 wait $pid
 exit 0
